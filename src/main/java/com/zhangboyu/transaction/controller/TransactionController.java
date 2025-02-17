@@ -7,13 +7,15 @@ import com.zhangboyu.transaction.dto.dto.TransactionDTO;
 import com.zhangboyu.transaction.dto.request.TransactionCreateRequest;
 import com.zhangboyu.transaction.dto.request.TransactionUpdateRequest;
 import com.zhangboyu.transaction.dto.response.BaseResponse;
+import com.zhangboyu.transaction.dto.response.PageData;
 import com.zhangboyu.transaction.dto.response.TransactionCreateData;
-import com.zhangboyu.transaction.dto.response.TransactionResponse;
+import com.zhangboyu.transaction.entity.CursorPageResult;
 import com.zhangboyu.transaction.entity.Transaction;
 import com.zhangboyu.transaction.service.iface.TransactionService;
 import com.zhangboyu.transaction.validator.TransactionValidator;
-import jakarta.annotation.PostConstruct;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -50,11 +52,14 @@ public class TransactionController {
     }
 
     @GetMapping
-    public PageDTO<TransactionResponse> getAllTransactions(
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size) {
-//        Page<Transaction> transactions = transactionService.listAllTransaction(page, size);
-        return null;
+    public BaseResponse<PageData<TransactionDTO>> getAllTransactions(
+            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int pageSize,
+            @RequestParam(required = false) String cursor) {
+        CursorPageResult<Transaction> transactionCursorPageResult = transactionService.listAllTransaction(transactionService.decodeCursor(cursor), pageSize);
+        PageData<TransactionDTO> transactionDTOPageData = transactionConverter.toTransactionDTOPageData(transactionCursorPageResult);
+        BaseResponse<PageData<TransactionDTO>> response = new BaseResponse<>();
+        response.setData(transactionDTOPageData);
+        return response;
     }
 
     @PutMapping("/{transactionNo}")

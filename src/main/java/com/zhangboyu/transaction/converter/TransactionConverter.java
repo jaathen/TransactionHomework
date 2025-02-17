@@ -1,13 +1,18 @@
 package com.zhangboyu.transaction.converter;
 
+import com.zhangboyu.transaction.dto.dto.PaginationDTO;
 import com.zhangboyu.transaction.dto.dto.TransactionDTO;
 import com.zhangboyu.transaction.dto.request.TransactionCreateRequest;
 import com.zhangboyu.transaction.dto.request.TransactionUpdateRequest;
+import com.zhangboyu.transaction.dto.response.PageData;
+import com.zhangboyu.transaction.entity.CursorPageResult;
 import com.zhangboyu.transaction.entity.Transaction;
 import org.springframework.stereotype.Component;
 
 import java.util.Date;
+import java.util.List;
 import java.util.Objects;
+import java.util.stream.Collectors;
 
 @Component
 public class TransactionConverter {
@@ -86,5 +91,25 @@ public class TransactionConverter {
         dto.setCreator(transaction.getCreator());
         dto.setUpdater(transaction.getUpdater());
         return dto;
+    }
+
+    public PageData<TransactionDTO> toTransactionDTOPageData(CursorPageResult<Transaction> result) {
+        if (result == null) {
+            return null;
+        }
+        PageData<TransactionDTO> data = new PageData<>();
+        data.setPagination(toPaginationDTO(result.isHasNext(), result.getNextCursor()));
+        List<TransactionDTO> transactionDTOList = result.getItems().stream()
+                .map(this::toTransactionDTO)
+                .collect(Collectors.toList());
+        data.setItems(transactionDTOList);
+        return data;
+    }
+
+    public PaginationDTO toPaginationDTO(boolean hasNext, String nextCursor) {
+        PaginationDTO paginationDTO = new PaginationDTO();
+        paginationDTO.setHasNext(hasNext);
+        paginationDTO.setNextCursor(nextCursor);
+        return paginationDTO;
     }
 }

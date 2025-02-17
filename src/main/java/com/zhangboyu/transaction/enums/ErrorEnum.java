@@ -7,7 +7,7 @@ public enum ErrorEnum {
     TRANSACTION_NOT_EXISTS_EXCEPTION(102, "交易不存在"),
 
     SYSTEM_EXCEPTION(500, "系统异常请稍后重试"),
-    CONCURRENCY_EXCEPTION(600, "并发异常请稍后重试"),
+    CONCURRENCY_EXCEPTION(600, "并发,请稍后重试"),
     ARGUMENT_EXCEPTION(4001, "参数异常"),
     ;
     ;

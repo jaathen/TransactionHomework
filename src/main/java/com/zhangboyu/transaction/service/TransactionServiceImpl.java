@@ -1,6 +1,7 @@
 package com.zhangboyu.transaction.service;
 
-import com.zhangboyu.transaction.dto.dto.PageDTO;
+import com.zhangboyu.transaction.entity.Cursor;
+import com.zhangboyu.transaction.entity.CursorPageResult;
 import com.zhangboyu.transaction.entity.Transaction;
 import com.zhangboyu.transaction.exception.TransactionException;
 import com.zhangboyu.transaction.repo.IdRepo;
@@ -9,7 +10,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-import java.util.Date;
+import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
@@ -116,7 +117,7 @@ public class TransactionServiceImpl implements TransactionService {
         ReentrantLock reentrantLock = keyLocks.computeIfAbsent(transaction.getTransactionNo(), a -> new ReentrantLock());
         boolean locked = false;
         boolean globalLocked = false;
-        Transaction oldTransaction = null;
+        Transaction oldTransaction;
         boolean needUpdateTimeIndex = false;
         try {
             locked = reentrantLock.tryLock();
@@ -153,8 +154,41 @@ public class TransactionServiceImpl implements TransactionService {
     }
 
     @Override
-    public PageDTO<Transaction> listAllTransaction(int page, int size) {
-        return null;
+    public CursorPageResult<Transaction> listAllTransaction(Cursor cursor, int pageSize) {
+        boolean lock = false;
+        try {
+            lock = globalLock.readLock().tryLock();
+            if (!lock) {
+                throw new TransactionException(CONCURRENCY_EXCEPTION);
+            }
+            NavigableMap<SortKey, Transaction> subMap;
+
+            if (cursor == null) {
+                subMap = timeIndex;
+            } else {
+                subMap = timeIndex.tailMap(new SortKey(new Date(cursor.getDate()), cursor.getTransactionNo()), false);
+            }
+
+            List<Transaction> transactions = new ArrayList<>(pageSize);
+
+            for (Map.Entry<SortKey, Transaction> entry : subMap.entrySet()) {
+                if (transactions.size() > pageSize) {
+                    break;
+                }
+                Transaction tx = entry.getValue();
+                transactions.add(tx);
+            }
+            CursorPageResult<Transaction> result = new CursorPageResult<>();
+            List<Transaction> items = transactions.subList(0, Math.min(transactions.size(), pageSize));
+            result.setItems(items);
+            result.setNextCursor(encodeCursor(items.getLast()));
+            result.setHasNext(transactions.size() > pageSize);
+            return result;
+        } finally {
+            if (lock) {
+                globalLock.readLock().unlock();
+            }
+        }
     }
 
     @Override
@@ -170,5 +204,23 @@ public class TransactionServiceImpl implements TransactionService {
     @Override
     public boolean existByTransactionNo(String transactionNo) {
         return transactionConcurrentHashMap.containsKey(transactionNo);
+    }
+
+    @Override
+    public Cursor decodeCursor(String encoded) {
+        if (encoded == null) return Cursor.initial();
+        String decode = new String(Base64.getUrlDecoder().decode(encoded));
+        String[] ss = decode.split(",");
+        return new Cursor(Long.parseLong(ss[0]), ss[1]);
+    }
+
+    @Override
+    public String encodeCursor(Transaction lastItem) {
+        if (lastItem == null) {
+            return null;
+        }
+        Cursor cursor = new Cursor(lastItem.getCreateTime().getTime(), lastItem.getTransactionNo());
+        String s = String.format("%d,%s", cursor.getDate(), cursor.getTransactionNo());
+        return Base64.getUrlEncoder().encodeToString(s.getBytes());
     }
 }
