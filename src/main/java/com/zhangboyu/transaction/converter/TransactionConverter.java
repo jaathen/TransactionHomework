@@ -26,6 +26,8 @@ public class TransactionConverter {
         transaction.setAmount(request.amount());
         transaction.setCurrency(request.currency());
         transaction.setRemark(request.remark());
+        transaction.setType(request.type());
+        transaction.setStatus(request.status());
         Date date = new Date();
         if (Objects.isNull(request.createTime())) {
             transaction.setCreateTime(date);
