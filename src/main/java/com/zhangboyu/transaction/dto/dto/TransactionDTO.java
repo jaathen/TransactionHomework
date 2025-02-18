@@ -2,8 +2,6 @@ package com.zhangboyu.transaction.dto.dto;
 
 import lombok.Data;
 
-import java.util.Date;
-
 @Data
 public class TransactionDTO {
     //交易编号

@@ -1,6 +1,5 @@
 package com.zhangboyu.transaction.service.iface;
 
-import com.zhangboyu.transaction.dto.dto.PageDTO;
 import com.zhangboyu.transaction.entity.Cursor;
 import com.zhangboyu.transaction.entity.CursorPageResult;
 import com.zhangboyu.transaction.entity.Transaction;

@@ -2,7 +2,6 @@ package com.zhangboyu.transaction.entity;
 
 import lombok.Data;
 
-import java.time.Instant;
 import java.util.Date;
 
 @Data

@@ -2,7 +2,6 @@ package com.zhangboyu.transaction.controller;
 
 
 import com.zhangboyu.transaction.converter.TransactionConverter;
-import com.zhangboyu.transaction.dto.dto.PageDTO;
 import com.zhangboyu.transaction.dto.dto.TransactionDTO;
 import com.zhangboyu.transaction.dto.request.TransactionCreateRequest;
 import com.zhangboyu.transaction.dto.request.TransactionUpdateRequest;
@@ -82,6 +81,7 @@ public class TransactionController {
     @DeleteMapping("/{transactionNo}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void deleteTransaction(@PathVariable @NotBlank String transactionNo) {
+        transactionValidator.validate(transactionNo);
         transactionService.deleteTransaction(transactionNo);
     }
 }

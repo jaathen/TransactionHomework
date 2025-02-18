@@ -9,9 +9,13 @@ import com.zhangboyu.transaction.service.iface.TransactionService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 import java.util.*;
-import java.util.concurrent.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ConcurrentSkipListMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
@@ -22,11 +26,11 @@ import static com.zhangboyu.transaction.enums.ErrorEnum.*;
 public class TransactionServiceImpl implements TransactionService {
     @Autowired
     private IdRepo idRepo;
-    private record SortKey(Date createdAt, String id) implements Comparable<SortKey> {
+    public record SortKey(Date createdAt, String transactionNo) implements Comparable<SortKey> {
         @Override
         public int compareTo(SortKey o) {
             int timeCompare = this.createdAt.compareTo(o.createdAt);
-            return timeCompare != 0 ? timeCompare : this.id.compareTo(o.id);
+            return timeCompare != 0 ? timeCompare : this.transactionNo.compareTo(o.transactionNo);
         }
     }
     private ConcurrentHashMap<String, Transaction> transactionConcurrentHashMap = new ConcurrentHashMap<>();
@@ -34,15 +38,18 @@ public class TransactionServiceImpl implements TransactionService {
     private ConcurrentSkipListMap<SortKey, Transaction> timeIndex = new ConcurrentSkipListMap<>();
 
     // 细粒度锁（按交易ID）
-    private final ConcurrentMap<String, ReentrantLock> keyLocks = new ConcurrentHashMap<>();
+    private ConcurrentMap<String, ReentrantLock> keyLocks = new ConcurrentHashMap<>();
 
     // 全局读写锁（用于索引维护）
-    private final ReentrantReadWriteLock globalLock = new ReentrantReadWriteLock();
+    private ReentrantReadWriteLock globalLock = new ReentrantReadWriteLock();
 
 
 
     @Override
     public String createTransaction(String serialNumber, Transaction transaction) {
+        if (!StringUtils.hasLength(serialNumber)) {
+            return null;
+        }
         transaction.setTransactionNo(createTransactionNo(serialNumber));
         ReentrantLock reentrantLock = keyLocks.computeIfAbsent(transaction.getTransactionNo(), a -> new ReentrantLock());
         boolean locked = false;
@@ -79,16 +86,21 @@ public class TransactionServiceImpl implements TransactionService {
 
     @Override
     public void deleteTransaction(String transactionNo) {
+        if (!StringUtils.hasLength(transactionNo)) {
+            return;
+        }
         ReentrantLock reentrantLock = keyLocks.computeIfAbsent(transactionNo, a -> new ReentrantLock());
         boolean locked = false;
         boolean globalLocked = false;
         Transaction removed = null;
+        boolean allRemove = false;
         try {
             locked = reentrantLock.tryLock();
             if (!locked) {
                 throw new TransactionException(CONCURRENCY_EXCEPTION);
             }
             if (!transactionConcurrentHashMap.containsKey(transactionNo)) {
+                keyLocks.remove(transactionNo, reentrantLock);
                 throw new TransactionException(TRANSACTION_NOT_EXISTS_EXCEPTION);
             }
             removed = transactionConcurrentHashMap.remove(transactionNo);
@@ -97,6 +109,7 @@ public class TransactionServiceImpl implements TransactionService {
                 throw new TransactionException(CONCURRENCY_EXCEPTION);
             }
             timeIndex.remove(new SortKey(removed.getCreateTime(), removed.getTransactionNo()));
+            allRemove = true;
         } catch (InterruptedException e) {
             log.error("deleteTransaction error, transactionNo:{}", transactionNo, e);
             throw new TransactionException(SYSTEM_EXCEPTION);
@@ -107,6 +120,9 @@ public class TransactionServiceImpl implements TransactionService {
                 transactionConcurrentHashMap.put(transactionNo, removed);
             }
             if (locked) {
+                if (allRemove) {
+                    keyLocks.remove(transactionNo, reentrantLock);
+                }
                 reentrantLock.unlock();
             }
         }
@@ -117,26 +133,27 @@ public class TransactionServiceImpl implements TransactionService {
         ReentrantLock reentrantLock = keyLocks.computeIfAbsent(transaction.getTransactionNo(), a -> new ReentrantLock());
         boolean locked = false;
         boolean globalLocked = false;
-        Transaction oldTransaction;
-        boolean needUpdateTimeIndex = false;
+        Transaction oldTransaction = null;
+        boolean diffSortKey = false;
         try {
             locked = reentrantLock.tryLock();
             if (!locked) {
                 throw new TransactionException(CONCURRENCY_EXCEPTION);
             }
-            if (!transactionConcurrentHashMap.containsKey(transaction.getTransactionNo())) {
+            oldTransaction = transactionConcurrentHashMap.get(transaction.getTransactionNo());
+            if (oldTransaction == null) {
+                keyLocks.remove(transaction.getTransactionNo(), reentrantLock);
                 throw new TransactionException(TRANSACTION_NOT_EXISTS_EXCEPTION);
             }
-            oldTransaction = transactionConcurrentHashMap.putIfAbsent(transaction.getTransactionNo(), transaction);
-            needUpdateTimeIndex = !transaction.getTransactionNo().equals(oldTransaction.getTransactionNo()) || transaction.getCreateTime().compareTo(oldTransaction.getCreateTime()) != 0;
-            if (!needUpdateTimeIndex) {
-                return;
-            }
+            transactionConcurrentHashMap.put(transaction.getTransactionNo(), transaction);
+            diffSortKey = !transaction.getTransactionNo().equals(oldTransaction.getTransactionNo()) || transaction.getCreateTime().compareTo(oldTransaction.getCreateTime()) != 0;
             globalLocked = globalLock.writeLock().tryLock(1, TimeUnit.SECONDS);
             if (!globalLocked) {
                 throw new TransactionException(CONCURRENCY_EXCEPTION);
             }
-            timeIndex.remove(new SortKey(oldTransaction.getCreateTime(), oldTransaction.getTransactionNo()));
+            if (diffSortKey) {
+                timeIndex.remove(new SortKey(oldTransaction.getCreateTime(), oldTransaction.getTransactionNo()));
+            }
             timeIndex.put(new SortKey(transaction.getCreateTime(), transaction.getTransactionNo()), transaction);
         } catch (InterruptedException e) {
             log.error("updateTransaction error, transactionNo:{}", transaction.getTransactionNo(), e);
@@ -144,8 +161,8 @@ public class TransactionServiceImpl implements TransactionService {
         } finally {
             if (globalLocked) {
                 globalLock.writeLock().unlock();
-            } else if (locked && needUpdateTimeIndex) {
-                transactionConcurrentHashMap.put(transaction.getTransactionNo(), transaction);
+            } else if (locked && Objects.nonNull(oldTransaction)) {
+                transactionConcurrentHashMap.put(transaction.getTransactionNo(), oldTransaction);
             }
             if (locked) {
                 reentrantLock.unlock();
@@ -181,8 +198,11 @@ public class TransactionServiceImpl implements TransactionService {
             CursorPageResult<Transaction> result = new CursorPageResult<>();
             List<Transaction> items = transactions.subList(0, Math.min(transactions.size(), pageSize));
             result.setItems(items);
-            result.setNextCursor(encodeCursor(items.getLast()));
-            result.setHasNext(transactions.size() > pageSize);
+            boolean hasNext = transactions.size() > pageSize;
+            result.setHasNext(hasNext);
+            if (hasNext) {
+                result.setNextCursor(encodeCursor(items.getLast()));
+            }
             return result;
         } finally {
             if (lock) {
@@ -193,25 +213,41 @@ public class TransactionServiceImpl implements TransactionService {
 
     @Override
     public String createTransactionNo(String serialNumber) {
+        if (!StringUtils.hasLength(serialNumber)) {
+            return null;
+        }
         return idRepo.createTransactionNo(serialNumber);
     }
 
     @Override
     public boolean existBySerialNo(String serialNo) {
+        if (!StringUtils.hasLength(serialNo)) {
+            return false;
+        }
         return transactionConcurrentHashMap.containsKey(idRepo.createTransactionNo(serialNo));
     }
 
     @Override
     public boolean existByTransactionNo(String transactionNo) {
+        if (!StringUtils.hasLength(transactionNo)) {
+            return false;
+        }
         return transactionConcurrentHashMap.containsKey(transactionNo);
     }
 
     @Override
     public Cursor decodeCursor(String encoded) {
-        if (encoded == null) return Cursor.initial();
-        String decode = new String(Base64.getUrlDecoder().decode(encoded));
-        String[] ss = decode.split(",");
-        return new Cursor(Long.parseLong(ss[0]), ss[1]);
+        if (!StringUtils.hasLength(encoded)) {
+            return Cursor.initial();
+        }
+        try {
+            String decode = new String(Base64.getUrlDecoder().decode(encoded));
+            String[] ss = decode.split(",");
+            return new Cursor(Long.parseLong(ss[0]), ss[1]);
+        } catch (Exception e) {
+            log.warn("decodeCursor error, encoded:{}", encoded, e);
+            throw new TransactionException(CURSOR_EXCEPTION);
+        }
     }
 
     @Override
