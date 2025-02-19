@@ -6,7 +6,6 @@ import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 
 public record TransactionUpdateRequest(
-        @NotNull String transactionNo,
         @NotNull Long fromAccountId,
         @NotNull Long toAccountId,
         @NotNull @Positive Long amount,

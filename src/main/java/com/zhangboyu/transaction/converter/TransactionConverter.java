@@ -50,7 +50,6 @@ public class TransactionConverter {
             return null;
         }
         Transaction transaction = new Transaction();
-        transaction.setTransactionNo(request.transactionNo());
         transaction.setFromAccountId(request.fromAccountId());
         transaction.setToAccountId(request.toAccountId());
         transaction.setAmount(request.amount());

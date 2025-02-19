@@ -51,7 +51,7 @@ public class TransactionUtils {
     }
 
     public static TransactionUpdateRequest updateRequest(String transactionNo) {
-        return new TransactionUpdateRequest(transactionNo, 1L,
+        return new TransactionUpdateRequest( 1L,
                 2L, 500L, "CNY", "remarkField",
                 1, 1, 1L, new Date().getTime(), 1L, new Date().getTime());
     }
