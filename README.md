@@ -4,6 +4,10 @@
 ## 技术栈
 * SpringBoot 3.4.2
 * jdk 21
+
+## 其他依赖
+lombok 自动生成getter/setter/注入logger等功能
+
 ## 快速开始
 * 使用docker方式部署
 ```
